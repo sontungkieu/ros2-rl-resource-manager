@@ -8,6 +8,8 @@ import signal
 import subprocess
 import time
 import atexit
+import subprocess
+import time
 from collections import deque
 from dataclasses import dataclass
 from typing import Deque, List, Optional, Tuple
@@ -24,6 +26,48 @@ try:
     import psutil  # type: ignore
 except Exception:
     psutil = None
+
+
+def wait_child_pid(ppid: int, pattern: str, timeout_s: float = 2.0) -> Optional[int]:
+    """
+    Find a child PID of ppid whose cmdline matches pattern.
+    Works for "ros2 run ..." wrapper spawning the real executable.
+    """
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        try:
+            out = subprocess.check_output(
+                ["pgrep", "-P", str(ppid), "-f", pattern],
+                text=True
+            ).strip().splitlines()
+            if out:
+                return int(out[0].strip())
+        except subprocess.CalledProcessError:
+            pass
+        time.sleep(0.05)
+    return None
+
+
+# ---- CPU% via /proc (robust, no psutil needed) ----
+CLK_TCK = os.sysconf(os.sysconf_names["SC_CLK_TCK"])
+
+def read_proc_cpu_seconds(pid: int) -> float:
+    """
+    Return (utime+stime) in seconds from /proc/<pid>/stat
+    """
+    with open(f"/proc/{pid}/stat", "r") as f:
+        s = f.read()
+
+    # /proc/<pid>/stat: field 2 is comm in parentheses (may contain spaces)
+    rparen = s.rfind(")")
+    rest = s[rparen + 2:]  # skip ") "
+    fields = rest.split()
+
+    # After comm, fields[0] corresponds to field 3 (state)
+    # utime is field 14, stime is field 15 => indexes 14-3=11 and 12
+    utime = int(fields[11])
+    stime = int(fields[12])
+    return (utime + stime) / float(CLK_TCK)
 
 
 def now_mono() -> float:
@@ -87,12 +131,14 @@ def pgrep_one(pattern: str) -> Optional[int]:
         return None
 
 
+
 @dataclass
 class HogProc:
     popen: subprocess.Popen
     load: float
-    start_t: float  # monotonic seconds
+    start_t: float
     name: str
+    cpu_pid: int  # PID process thật (child), không phải wrapper ros2
 
 
 class HzStatsTracker:
@@ -158,9 +204,12 @@ class ExperimentNode(Node):
         self.window_s = window_s
         self.out_csv = out_csv
         self.out_png = out_png
-        self.slam_regex = slam_regex
+        self.slam_regex = "async_slam_toolbox_node"
+        print(self.slam_regex)
         self.bridge_regex = bridge_regex
         self.dry_run = dry_run
+        # ---- CPU sampling cache: pid -> (last_wall_mono, last_cpu_seconds) ----
+        self._cpu_last = {}
 
         # Subscriptions
         map_qos = QoSProfile(
@@ -240,6 +289,43 @@ class ExperimentNode(Node):
             psutil.cpu_percent(interval=None)
 
         self.timer = self.create_timer(self.log_period_s, self.tick)
+    
+    def _cpu_pct(self, pid: Optional[int]) -> float:
+        """
+        CPU% of a process since last sample:
+        (delta_cpu_time / delta_wall_time) * 100
+        100% ~= full 1 core.
+        """
+        if pid is None:
+            return float("nan")
+
+        wall = time.monotonic()
+        try:
+            cpu_s = read_proc_cpu_seconds(pid)
+        except FileNotFoundError:
+            # process ended
+            self._cpu_last.pop(pid, None)
+            return float("nan")
+        except Exception:
+            return float("nan")
+
+        prev = self._cpu_last.get(pid)
+        self._cpu_last[pid] = (wall, cpu_s)
+
+        if prev is None:
+            # first sample is baseline
+            return float("nan")
+
+        prev_wall, prev_cpu = prev
+        dw = wall - prev_wall
+        dc = cpu_s - prev_cpu
+        if dw <= 1e-9:
+            return float("nan")
+        if dc < 0:
+            return float("nan")
+
+        return (dc / dw) * 100.0
+
 
     def _sig_handler(self, signum, frame):
         self.get_logger().warn(f"Received signal {signum}, cleaning up hogs...")
@@ -315,7 +401,7 @@ class ExperimentNode(Node):
         stdout_f = open(os.path.join(logdir, f"{name}.out"), "w")
         stderr_f = open(os.path.join(logdir, f"{name}.err"), "w")
 
-        # start_new_session=True => new process group (killpg will kill the whole group)
+        # start new process group so killpg works
         p = subprocess.Popen(
             cmd,
             stdout=stdout_f,
@@ -323,9 +409,16 @@ class ExperimentNode(Node):
             start_new_session=True,
         )
 
-        self.hogs.append(HogProc(popen=p, load=load, start_t=now_mono(), name=name))
+        # IMPORTANT: p.pid is wrapper "ros2 run", we want the real child hog PID
+        child = wait_child_pid(p.pid, f"__node:={name}", timeout_s=2.0)
+        cpu_pid = child if child is not None else p.pid
+
+        self.hogs.append(HogProc(popen=p, load=load, start_t=now_mono(), name=name, cpu_pid=cpu_pid))
         self.events.append((now_mono() - self.t0, f"hog {idx} load={load}"))
-        self.get_logger().info(f"Started {name} (pid={p.pid}) load={load}")
+
+        self.get_logger().info(f"Started {name} parent(pid)={p.pid} cpu_pid={cpu_pid} load={load}")
+        self.get_logger().info(f"CPU monitor attached: {name} pid={cpu_pid}")
+
     
     def _kill_popen_group(self, p: subprocess.Popen, label: str, timeout_s: float = 2.0):
         if p is None:
@@ -410,10 +503,12 @@ class ExperimentNode(Node):
     def _cpu_total_hogs(self) -> float:
         total = 0.0
         for h in self.hogs:
-            v = self._cpu_of_pid(h.popen.pid, label=h.name)
+            pid = getattr(h, "cpu_pid", h.popen.pid)  # fallback nếu chưa có cpu_pid
+            v = self._cpu_of_pid(pid, label=h.name)
             if math.isfinite(v):
                 total += v
         return total
+
 
 
     def tick(self):
@@ -428,6 +523,7 @@ class ExperimentNode(Node):
                 self.next_hog_idx += 1
             else:
                 break
+
         # Refresh PIDs every few seconds (avoid heavy ps scanning every tick)
         if t_rel >= self._next_pid_scan_t:
             self._next_pid_scan_t = t_rel + self._pid_scan_every_s
@@ -442,7 +538,6 @@ class ExperimentNode(Node):
                 if self._bridge_pid is not None:
                     self.get_logger().info(f"Found ros_gz_bridge pid={self._bridge_pid}")
 
-
         # Compute metrics
         scan_hz, scan_dt_min, scan_dt_max, scan_dt_std, scan_n = self.scan_rate.stats(t_now)
         map_hz,  map_dt_min,  map_dt_max,  map_dt_std,  map_n  = self.map_rate.stats(t_now)
@@ -452,6 +547,7 @@ class ExperimentNode(Node):
         cpu_slam = self._cpu_of_pid(self._slam_pid, label="slam_toolbox")
         cpu_bridge = self._cpu_of_pid(self._bridge_pid, label="ros_gz_bridge")
 
+        # IMPORTANT: cpu_hogs must sum REAL hog child pids, not ros2 wrapper pid
         cpu_hogs = self._cpu_total_hogs()
 
         sim_time = self._ros_time_sec()
@@ -485,14 +581,14 @@ class ExperimentNode(Node):
         self.csv_f.flush()
         self.rows.append(row)
 
+        # Single debug block (remove duplicate)
         if t_rel - self._last_debug_log_t >= self._debug_every_s:
             self._last_debug_log_t = t_rel
             self.get_logger().info(
                 f"t={t_rel:.1f}s scan={scan_hz:.2f}Hz map={map_hz:.2f}Hz | "
-                f"scan: {scan_hz:.2f}Hz dt[min={scan_dt_min:.3f} max={scan_dt_max:.3f} std={scan_dt_std:.3f}] n={scan_n} | "
-                f"map: {map_hz:.2f}Hz dt[min={map_dt_min:.3f} max={map_dt_max:.3f} std={map_dt_std:.3f}] n={map_n} | "
-                f"cpu slam={cpu_slam:.1f}% bridge={cpu_bridge:.1f}% hog_total={cpu_hogs:.1f}% "
-                f"hogs={len(self.hogs)}"
+                f"scan dt[min={scan_dt_min:.3f} max={scan_dt_max:.3f} std={scan_dt_std:.3f}] n={scan_n} | "
+                f"map  dt[min={map_dt_min:.3f} max={map_dt_max:.3f} std={map_dt_std:.3f}] n={map_n} | "
+                f"cpu slam={cpu_slam:.1f}% bridge={cpu_bridge:.1f}% hog_total={cpu_hogs:.1f}% hogs={len(self.hogs)}"
             )
 
             if self._slam_pid is None:
@@ -500,11 +596,16 @@ class ExperimentNode(Node):
             if self._bridge_pid is None:
                 self.get_logger().warn("ros_gz_bridge PID not found yet (pgrep failed).")
 
+            if self.hogs:
+                self.get_logger().info(
+                    "hog pids: " + ", ".join(f"{h.name}:{getattr(h,'cpu_pid',h.popen.pid)}" for h in self.hogs)
+                )
 
         # Stop after duration
         if t_rel >= self.duration_s:
             self.get_logger().info("Duration reached. Stopping hogs and writing plot...")
             self._shutdown()
+
 
     def _shutdown(self):
         # 1) Stop/kill all hogs robustly (kill whole process groups)
