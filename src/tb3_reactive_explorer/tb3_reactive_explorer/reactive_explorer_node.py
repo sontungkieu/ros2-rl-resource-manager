@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import math
 import random
+import os
+import json
 from typing import Optional
 
 import rclpy
@@ -9,6 +11,7 @@ from rclpy.qos import qos_profile_sensor_data
 
 from geometry_msgs.msg import TwistStamped
 from sensor_msgs.msg import LaserScan
+from std_msgs.msg import String
 
 
 def finite_min(vals):
@@ -41,7 +44,20 @@ class ReactiveExplorer(Node):
         self.wander_until = self.get_clock().now()
         self.next_wander = self.get_clock().now()
 
+        # Publish PID for RL resource manager
+        self.pub_status = self.create_publisher(String, "/cpu_hog_status", 10)
+        self.create_timer(1.0, self.publish_status)
+
         self.timer = self.create_timer(0.1, self.tick)  # 10Hz
+
+    def publish_status(self):
+        msg = String()
+        data = {
+            "name": self.get_name(),
+            "pid": os.getpid()
+        }
+        msg.data = json.dumps(data)
+        self.pub_status.publish(msg)
 
     def on_scan(self, msg: LaserScan):
         self.last_scan = msg

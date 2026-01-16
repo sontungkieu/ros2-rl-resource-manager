@@ -6,8 +6,8 @@ A workspace for SLAM, reactive exploration, and RL-based resource management on 
 
 - **`tb3_reactive_explorer`**: Obstacle avoidance and random wandering (`/scan` → `/cmd_vel`).
 - **`mini_mapper`**: Simple occupancy-grid mapper (`/odom` + `/scan` → `/mini_map`).
-- **`rl_resource_manager`**: Q-learning agent managing system resources (nice values) to profiling SLAM performance under load.
-- **`experiment_metrics.py`**: Benchmarking script for measuring jitter, stamp age, and resource usage.
+- **`rl_resource_manager`**: Q-learning agent managing system resources (nice values). Supports persistent Q-table and epsilon decay.
+- **`experiment_metrics.py`**: Benchmarking script for repeated learning episodes and overlapping load measurement.
 
 ## Setup & Build
 
@@ -61,17 +61,13 @@ ros2 run tb3_reactive_explorer reactive_explorer --ros-args \
   -p wander_turn_every_s:=10.0
 ```
 
-### Terminal 4: Resource Manager & CPU Load (RL)
-Run the resource manager to adaptively control process priorities:
-```bash
-source ~/slam_rl_ws/install/setup.bash
-ros2 run rl_resource_manager rl_resource_manager
-```
+### Terminal 4: RL Resource Manager (Root)
+Run the resource manager with `sudo` to allow it to adjust process priorities (nice values).
+The manager now saves/loads its Q-table from `~/slam_rl_ws/q_table.json` for persistent learning.
 
-Run a background CPU stress node ("Hog") to induce load:
 ```bash
-source ~/slam_rl_ws/install/setup.bash
-ros2 run rl_resource_manager cpu_hog --ros-args -p load:=0.8
+# Must use absolute path to setup.bash inside the root shell
+sudo bash -c 'source /opt/ros/jazzy/setup.bash && source /home/tung/slam_rl_ws/install/setup.bash && ros2 run rl_resource_manager rl_resource_manager'
 ```
 
 ### Terminal 5: Visualization
@@ -82,20 +78,32 @@ ros2 run rviz2 rviz2
 
 ---
 
-## Running Experiments
+## Running Experiments (Training Mode)
 
-Use the provided script to run a controlled experiment measuring SLAM performance under increasing load.
+Use the updated script to run repeated experiments for training the RL manager.
+This supports **overlapping CPU hogs** and **multiple episodes**.
+
+**Example:**
+- **Loads**: [0.6, 0.8, 0.9]
+- **Step**: Start a new hog every 10s.
+- **Duration**: Each hog runs for 30s (creating overlap).
+- **Episodes**: Repeat the sequence 5 times.
+- **Wait**: Pause 20s between episodes.
 
 ```bash
 source ~/slam_rl_ws/install/setup.bash
 cd ~/slam_rl_ws
+
 python3 experiment_metrics.py \
-  --loads 0.0,0.5,0.8,0.95 \
-  --start-after 5 \
-  --step 30 \
-  --duration 150 \
+  --loads 0.6,0.8,0.9 \
+  --step 10 \
+  --hog-duration 30 \
+  --episodes 5 \
+  --episode-wait 20 \
   --outdir metrics_out
 ```
+
+The script will produce a CSV and PNG in `metrics_out/` and print a summary table comparing performance across episodes.
 
 ### Saving the Map
 To save the generated map to disk:

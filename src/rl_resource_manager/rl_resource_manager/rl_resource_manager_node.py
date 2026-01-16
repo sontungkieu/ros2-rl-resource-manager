@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 import random
+import json
+import os
+import atexit
 from collections import deque, defaultdict
 from typing import Optional, Tuple, Dict, List
 
@@ -8,6 +11,7 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
 from nav_msgs.msg import OccupancyGrid
+from std_msgs.msg import String
 
 
 def find_pid_by_cmd_contains(substr: str) -> Optional[int]:
@@ -58,26 +62,91 @@ class RLResourceManager(Node):
         self.declare_parameter("max_map_period_s", 1.5)
         self.declare_parameter("cpu_high_pct", 75.0)
 
-        self.declare_parameter("eps", 0.15)
+        self.declare_parameter("eps", 0.5)      # Start with high exploration
+        self.declare_parameter("eps_min", 0.05)
+        self.declare_parameter("eps_decay", 0.995)
         self.declare_parameter("alpha", 0.25)
         self.declare_parameter("gamma", 0.85)
+        
+        # Persistence
+        self.declare_parameter("q_model_path", os.path.expanduser("~/slam_rl_ws/q_table.json"))
 
         self.scan_times = deque(maxlen=200)
         self.map_times = deque(maxlen=60)
 
         self.create_subscription(LaserScan, "/scan", self.on_scan, 50)
         self.create_subscription(OccupancyGrid, "/map", self.on_map, 10)
+        self.create_subscription(String, "/cpu_hog_status", self.on_process_status, 10)
 
         self.Q: Dict[Tuple[int,int,int], List[float]] = defaultdict(lambda: [0.0, 0.0, 0.0])
+        self.load_q_table()
+        
         self.prev_state: Optional[Tuple[int,int,int]] = None
         self.prev_action: Optional[int] = None
 
-        self.pid_hog = None
-        self.pid_rviz = None
-        self.pid_explorer = None
+        self.pid_hog = None     # From /cpu_hog_status
+        self.pid_explorer = None  # From /cpu_hog_status (reactive_explorer)
+        self.pid_rviz = None     # find_pid
+        self.pid_gazebo = None   # find_pid
 
         self.create_timer(float(self.get_parameter("step_s").value), self.step)
-        self.get_logger().info("rl_resource_manager started. Waiting /scan + /map ...")
+        
+        # Save on exit
+        atexit.register(self.save_q_table)
+        
+        self.get_logger().info("rl_resource_manager started. Waiting /scan + /map + /cpu_hog_status ...")
+
+    def load_q_table(self):
+        path = self.get_parameter("q_model_path").value
+        if os.path.exists(path):
+            try:
+                with open(path, "r") as f:
+                    data = json.load(f)
+                    count = 0
+                    for k_str, v in data.items():
+                        # key format "1,0,1"
+                        try:
+                            parts = k_str.split(',')
+                            if len(parts) == 3:
+                                key = (int(parts[0]), int(parts[1]), int(parts[2]))
+                                self.Q[key] = v
+                                count += 1
+                        except:
+                            pass
+                self.get_logger().info(f"Loaded Q-table from {path} ({count} states)")
+            except Exception as e:
+                self.get_logger().error(f"Failed to load Q-table: {e}")
+                
+    def save_q_table(self):
+        path = self.get_parameter("q_model_path").value
+        try:
+            # Convert keys to strings
+            data = {}
+            for k, v in self.Q.items():
+                k_str = f"{k[0]},{k[1]},{k[2]}"
+                data[k_str] = v
+            
+            with open(path, "w") as f:
+                json.dump(data, f, indent=2)
+            print(f"[rl_manager] Saved Q-table to {path}")
+        except Exception as e:
+            print(f"[rl_manager] Failed to save Q-table: {e}")
+
+    def on_process_status(self, msg: String):
+        try:
+            data = json.loads(msg.data)
+            pid = data.get("pid")
+            name = data.get("name", "")
+            if not pid:
+                return
+            
+            # Identify which component sent this
+            if "cpu_hog" in name:
+                self.pid_hog = pid
+            elif "reactive_explorer" in name:
+                self.pid_explorer = pid
+        except json.JSONDecodeError:
+            pass
 
     def on_scan(self, msg: LaserScan):
         self.scan_times.append(self.get_clock().now().nanoseconds / 1e9)
@@ -123,30 +192,56 @@ class RLResourceManager(Node):
             return random.randint(0, 2)
         q = self.Q[state]
         return int(max(range(3), key=lambda i: q[i]))
+        
+    def _decay_epsilon(self):
+        eps = float(self.get_parameter("eps").value)
+        eps_min = float(self.get_parameter("eps_min").value)
+        eps_decay = float(self.get_parameter("eps_decay").value)
+        
+        if eps > eps_min:
+            new_eps = max(eps_min, eps * eps_decay)
+            # Set parameter back to ROS system
+            self.set_parameters([rclpy.parameter.Parameter("eps", rclpy.Parameter.Type.DOUBLE, new_eps)])
+            # Log periodically? (not every step)
+            # self.get_logger().info(f"Epsilon decayed to {new_eps:.4f}")
 
     def _apply_action(self, action: int):
-        # discover pids lazily
-        if self.pid_hog is None:
-            self.pid_hog = find_pid_by_cmd_contains("cpu_hog")
+        # Discover PIDs that don't publish status (rviz, gazebo)
         if self.pid_rviz is None:
             self.pid_rviz = find_pid_by_cmd_contains("rviz2")
-        if self.pid_explorer is None:
-            self.pid_explorer = find_pid_by_cmd_contains("reactive_explorer")
+        # Try finding gazebo related processes
+        if self.pid_gazebo is None:
+             # Common gazebo process names
+            p = find_pid_by_cmd_contains("gzserver") or \
+                find_pid_by_cmd_contains("gzsim") or \
+                find_pid_by_cmd_contains("ruby") # often launches gazebo
+            if p: self.pid_gazebo = p
 
+        # Action 0: BALANCED
+        # Reset everything to default nice=0
         if action == 0:
             if self.pid_hog: safe_set_nice(self.pid_hog, 0, self.get_logger())
             if self.pid_rviz: safe_set_nice(self.pid_rviz, 0, self.get_logger())
             if self.pid_explorer: safe_set_nice(self.pid_explorer, 0, self.get_logger())
+            if self.pid_gazebo: safe_set_nice(self.pid_gazebo, 0, self.get_logger())
             self.get_logger().info("action 0 BALANCED")
+
+        # Action 1: PRIORITIZE_SLAM
+        # Making others nicer (higher value = lower priority) to favor SLAM (which stays at 0 or effectively higher)
         elif action == 1:
-            if self.pid_hog: safe_set_nice(self.pid_hog, 15, self.get_logger())
-            if self.pid_rviz: safe_set_nice(self.pid_rviz, 10, self.get_logger())
-            if self.pid_explorer: safe_set_nice(self.pid_explorer, 5, self.get_logger())
+            if self.pid_hog: safe_set_nice(self.pid_hog, 19, self.get_logger())  # Max nice
+            if self.pid_rviz: safe_set_nice(self.pid_rviz, 15, self.get_logger())
+            if self.pid_explorer: safe_set_nice(self.pid_explorer, 10, self.get_logger())
+            if self.pid_gazebo: safe_set_nice(self.pid_gazebo, 5, self.get_logger()) # Slow down sim slightly if needed
             self.get_logger().info("action 1 PRIORITIZE_SLAM")
+
+        # Action 2: PRIORITIZE_VIZ 
+        # Keep rviz responsive, limit hogs heavily, explorer moderately
         else:
-            if self.pid_hog: safe_set_nice(self.pid_hog, 8, self.get_logger())
-            if self.pid_rviz: safe_set_nice(self.pid_rviz, 0, self.get_logger())
-            if self.pid_explorer: safe_set_nice(self.pid_explorer, 0, self.get_logger())
+            if self.pid_hog: safe_set_nice(self.pid_hog, 15, self.get_logger())
+            if self.pid_rviz: safe_set_nice(self.pid_rviz, -5, self.get_logger()) # Boost priority (needs sudo/privileges usually, else 0)
+            if self.pid_explorer: safe_set_nice(self.pid_explorer, 5, self.get_logger())
+            if self.pid_gazebo: safe_set_nice(self.pid_gazebo, 5, self.get_logger())
             self.get_logger().info("action 2 PRIORITIZE_VIZ")
 
     def step(self):
@@ -159,6 +254,7 @@ class RLResourceManager(Node):
             qsa = self.Q[self.prev_state][self.prev_action]
             self.Q[self.prev_state][self.prev_action] = qsa + alpha * (reward + gamma * max(self.Q[state]) - qsa)
 
+        self._decay_epsilon()
         action = self._choose_action(state)
         self._apply_action(action)
 
