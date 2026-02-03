@@ -1,0 +1,87 @@
+\section{Appendix A: Step-by-Step RViz2 Configuration Guide}
+\label{appendix:rviz_guide}
+
+This appendix provides a detailed visual guide on configuring RViz2 to visualize the TurtleBot3, its sensor data, and the SLAM process.
+
+\subsection{Step 1: Launching RViz2}
+Open a new terminal and execute the following command to start the visualization tool:
+
+\begin{bashcode}[title={Terminal: Start RViz2}]
+ros2 run rviz2 rviz2
+\end{bashcode}
+
+At startup, the main window will be empty. The first task is to configure the reference frame.
+
+\subsection{Step 2: Setting the Fixed Frame}
+By default, the Fixed Frame might be set to \texttt{map} or \texttt{world}. For basic telemetry and sensor testing, we switch this to the odometry frame.
+
+\begin{enumerate}
+    \item Locate the \textbf{Displays} panel on the left side.
+    \item Expand \textbf{Global Options}.
+    \item Click on \textbf{Fixed Frame} and manually type or select \textbf{odom}.
+\end{enumerate}
+
+\begin{figure}[H]
+    \centering
+    % Thay ảnh rviz1.png của bạn vào đây
+    \includegraphics[width=0.8\linewidth]{images/rviz1.png}
+    \caption{Changing the Fixed Frame to \texttt{odom}}
+    \label{fig:rviz_step1}
+\end{figure}
+
+\subsection{Step 3: Visualizing LiDAR Data (LaserScan)}
+To see what the robot "sees", we need to add the LaserScan display.
+
+\begin{enumerate}
+    \item Click the \textbf{Add} button at the bottom left.
+    \item Select the \textbf{By Topic} tab.
+    \item Find \texttt{/scan} and select \textbf{LaserScan}.
+    \item Click \textbf{OK}.
+\end{enumerate}
+The red dots representing obstacle distances will appear on the screen.
+
+\begin{figure}[H]
+    \centering
+    % Thay ảnh rviz2.png của bạn vào đây
+    \includegraphics[width=0.8\linewidth]{images/rviz3.png}
+    \caption{Adding the LaserScan topic to visualize LiDAR data}
+    \label{fig:rviz_step2}
+\end{figure}
+
+\subsection{Step 4: Visualizing the Robot Model}
+To visualize the physical structure of the TurtleBot3 Burger:
+
+\begin{enumerate}
+    \item Click the \textbf{Add} button again.
+    \item Select the \textbf{By Display Type} tab (or search in the list).
+    \item Select \textbf{RobotModel}.
+    \item \textit{Optional:} Add \textbf{TF} (Transform Framework) to see the coordinate axes of the wheels and sensors.
+\end{enumerate}
+
+\begin{figure}[H]
+    \centering
+    % Thay ảnh rviz3.png hoặc rviz4.png của bạn vào đây
+    \includegraphics[width=0.8\linewidth]{images/rviz4.png}
+    \caption{RobotModel added to the visualization}
+    \label{fig:rviz_step3}
+\end{figure}
+
+\subsection{Step 5: Visualizing SLAM Map (Mapping Process)}
+When running SLAM (Simultaneous Localization and Mapping), the Fixed Frame must be set back to \textbf{map} to correctly overlay the generated map.
+
+\begin{enumerate}
+    \item Change \textbf{Fixed Frame} back to \textbf{map}.
+    \item Click \textbf{Add} $\rightarrow$ \textbf{By Topic}.
+    \item Select \texttt{/map} $\rightarrow$ \textbf{Map}.
+    \item Set the \textbf{Update Interval} to 1 or 2 seconds for real-time updates.
+\end{enumerate}
+
+As the robot moves, the map will transition from unknown (grey) to free space (white) and obstacles (black).
+
+\begin{figure}[H]
+    \centering
+    % Thay ảnh slam.png hoặc rviz_nav.png của bạn vào đây
+    \includegraphics[width=0.9\linewidth]{images/slam.png}
+    \caption{Real-time SLAM process visualizing the map and robot trajectory}
+    \label{fig:rviz_slam}
+\end{figure}

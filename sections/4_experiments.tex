@@ -1,0 +1,55 @@
+\section{Experiments and Results}
+The testing process was conducted using a Multi-process model across three separate Terminal windows.
+
+\subsection{Terminal 1: Launching the Simulation Environment}
+This window is responsible for running the Gazebo backend and loading the simulation world.
+
+\begin{bashcode}[title={Terminal 1: Launch Gazebo}]
+# Launch Gazebo with TurtleBot3 world
+source /opt/ros/jazzy/setup.bash
+export TURTLEBOT3_MODEL=burger
+ros2 launch turtlebot3_gazebo turtlebot3_world.launch.py
+\end{bashcode}
+
+\textbf{Result:} The Gazebo environment displayed successfully. The TurtleBot3 Burger robot appeared at the origin coordinates along with obstacle objects.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\linewidth]{images/gazebo.png}
+    \caption{Gazebo Harmonic simulation interface with TurtleBot3}
+    \label{fig:gazebo}
+\end{figure}
+
+\subsection{Terminal 2: Robot Teleoperation}
+This window runs the control node, sending velocity signals to the \texttt{/cmd\_vel} topic.
+
+\begin{bashcode}[title={Terminal 2: Teleop Keyboard}]
+# Run teleop node
+source /opt/ros/jazzy/setup.bash
+export TURTLEBOT3_MODEL=burger
+ros2 run turtlebot3_teleop teleop_keyboard
+\end{bashcode}
+
+\textit{Control Operation:} Using keys \textbf{w, a, s, d, x} to move the robot. The robot responded well to control commands, moving smoothly within the simulated environment.
+
+\subsection{Terminal 3: Data Visualization}
+This window runs RViz2 to display LiDAR sensor data.
+
+\begin{bashcode}[title={Terminal 3: RViz2}]
+# Run Visualization tool
+ros2 run rviz2 rviz2
+\end{bashcode}
+
+\textbf{RViz2 Configuration Performed:}
+\begin{itemize}
+    \item \textbf{Fixed Frame:} Switched to \texttt{odom}.
+    \item \textbf{Add Topic:} Added \texttt{/scan} to display LaserScan (environmental scan data).
+    \item \textbf{Add RobotModel:} Added the robot model from the \texttt{/robot\_description} topic.
+\end{itemize}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\linewidth]{images/rviz.png}
+    \caption{RViz2 interface displaying Laser scan data (red points)}
+    \label{fig:rviz}
+\end{figure}

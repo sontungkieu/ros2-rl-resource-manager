@@ -1,1 +1,29 @@
+# Output metrics
 /metrics_out
+
+# LaTeX build artifacts
+*.aux
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+*.toc
+*.lof
+*.lot
+*.lol
+*.bbl
+*.blg
+*.nav
+*.snm
+*.vrb
+*.run.xml
+*.bcf
+*.listing
+
+# Generated PDFs (uncomment to ignore compiled PDFs)
+# *.pdf
+
+# Build / temp folders
+/build/
+/log/

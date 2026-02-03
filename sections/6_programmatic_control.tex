@@ -1,0 +1,64 @@
+\section{Programmatic Navigation Control}
+
+\subsection{Objective}
+While RViz is excellent for testing, real-world robotics applications require automated control via software. In this section, I utilize the \texttt{nav2\_simple\_commander} API to write a Python script that enables the robot to autonomously patrol through a sequence of pre-defined waypoints.
+
+\subsection{The Nav2 Simple Commander API}
+The \texttt{Nav2 Simple Commander} is a Python library provided by the Navigation 2 stack. It offers a high-level interface to interact with the Nav2 action servers, allowing developers to:
+\begin{itemize}
+    \item Set initial poses programmatically.
+    \item Send single goals (GoToPose) or multiple goals (FollowWaypoints).
+    \item Monitor navigation feedback and cancel tasks if necessary.
+\end{itemize}
+
+\subsection{Implementation: Waypoint Following Script}
+I developed a script named \texttt{patrol\_robot.py} to simulate a security patrol task. The robot is commanded to visit a sequence of coordinate points on the map created in the previous section.
+
+\begin{pythoncode}[title={patrol\_robot.py (Simplified)}]
+from nav2_simple_commander.robot_navigator import BasicNavigator
+import rclpy
+from geometry_msgs.msg import PoseStamped
+
+def main():
+    rclpy.init()
+    nav = BasicNavigator()
+    nav.waitUntilNav2Active()
+
+    # Define waypoints list
+    waypoints = []
+    
+    # Waypoint 1
+    wp1 = PoseStamped()
+    wp1.header.frame_id = 'map'
+    wp1.pose.position.x = 1.5
+    wp1.pose.position.y = 0.5
+    wp1.pose.orientation.w = 1.0
+    waypoints.append(wp1)
+    
+    # Send the path to the robot
+    nav.followWaypoints(waypoints)
+    
+    while not nav.isTaskComplete():
+        pass # Wait for task completion
+
+    rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+\end{pythoncode}
+
+\subsection{Execution and Results}
+To execute the autonomous patrol, the following command was used while the Nav2 stack was active:
+
+\begin{bashcode}[title={Terminal: Run Python Script}]
+python3 patrol_robot.py
+\end{bashcode}
+
+\textbf{Result:} The robot successfully received the waypoint list. The Global Planner generated a continuous path connecting all points, and the robot navigated sequentially to each location without stopping.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\linewidth]{images/nav_path_2.png}
+    \caption{TurtleBot3 executing a multi-point patrol mission via Python script}
+    \label{fig:waypoint}
+\end{figure}

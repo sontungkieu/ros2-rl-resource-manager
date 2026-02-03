@@ -1,0 +1,118 @@
+\documentclass[a4paper,12pt]{article}
+
+% --- Language and Encoding ---
+\usepackage[utf8]{inputenc}
+\usepackage[english]{babel}
+\usepackage[T1]{fontenc} % Quan trọng để copy ký tự đúng
+
+% --- Formatting Packages ---
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{float}
+\usepackage{titlesec}
+\usepackage{fancyhdr}
+\usepackage{enumitem}
+
+% --- Code Box Package (Thay cho listings đơn thuần) ---
+\usepackage{tcolorbox}
+\tcbuselibrary{listings, skins}
+
+% --- Hyperref (load after other packages) ---
+\usepackage{hyperref}
+
+% --- Page Layout ---
+\geometry{
+  left=25mm,
+  right=20mm,
+  top=20mm,
+  bottom=20mm,
+}
+
+% --- Cấu hình Box Code thân thiện copy ---
+\definecolor{codegray}{rgb}{0.95,0.95,0.95}
+\definecolor{codeframe}{rgb}{0.3,0.3,0.3}
+
+% Định nghĩa môi trường 'bashcode' mới
+\newtcblisting{bashcode}[1][]{
+  enhanced,
+  colback=codegray,     % Màu nền xám nhẹ
+  colframe=codeframe,   % Màu viền
+  arc=3pt,              % Bo góc nhẹ
+  boxrule=0.5pt,        % Viền mỏng
+  listing only,
+  title=\textbf{Terminal/Command}, % Tiêu đề mặc định
+  listing options={
+    basicstyle=\ttfamily\small, % Font monospaced
+    language=bash,
+    breaklines=true,
+    showstringspaces=false,
+    columns=fullflexible, % QUAN TRỌNG: Giúp copy không bị lỗi khoảng trắng
+    numbers=none,         % QUAN TRỌNG: Tắt số dòng để copy dễ dàng
+    upquote=true,         % Đảm bảo dấu nháy đơn copy đúng
+    keywordstyle=\color{blue}\bfseries,
+    commentstyle=\color{green!60!black},
+  },
+  #1
+}
+
+% --- Hyperlink Setup ---
+\hypersetup{
+    colorlinks=true,
+    linkcolor=black,
+    filecolor=magenta,      
+    urlcolor=blue,
+}
+
+\begin{document}
+
+\pagenumbering{gobble} % Title page without page number
+
+% --- Include Sections ---
+\input{sections/0_title}
+
+\clearpage
+\pagenumbering{roman} % Front matter numbering
+
+\tableofcontents
+\newpage
+
+\pagenumbering{arabic}
+
+% Định nghĩa môi trường 'pythoncode'
+\newtcblisting{pythoncode}[1][]{
+  enhanced,
+  colback=codegray,
+  colframe=codeframe,
+  arc=3pt,
+  boxrule=0.5pt,
+  listing only,
+  title=\textbf{Python Script},
+  listing options={
+    basicstyle=\ttfamily\small,
+    language=Python,
+    breaklines=true,
+    showstringspaces=false,
+    columns=fullflexible,
+    numbers=none, 
+    keywordstyle=\color{blue}\bfseries,
+    commentstyle=\color{green!60!black},
+    stringstyle=\color{red},
+  },
+  #1
+}
+
+\input{sections/1_introduction}
+\input{sections/2_system_env}
+\input{sections/3_installation}
+\input{sections/4_experiments}
+\input{sections/5_navigation_research}
+\input{sections/6_programmatic_control} % Kết luận xong
+\input{sections/7_conclusion} % Kết luận xong
+
+% --- Bắt đầu phần Phụ lục ---
+\newpage
+\appendix
+\input{sections/appendix_rviz}
+
+\end{document}

@@ -1,0 +1,72 @@
+\section{Detailed Installation and Configuration Process}
+
+\subsection{Windows Subsystem for Linux (WSL) Installation}
+To leverage hardware performance on Windows 11, I installed WSL 2 and set up an Ubuntu 24.04 virtual machine via PowerShell (Administrator privileges).
+
+% Sử dụng [title=...] để đặt tên cho box code
+\begin{bashcode}[title={PowerShell: Initial Setup}]
+# Install WSL and Ubuntu 24.04 default
+wsl --install -d Ubuntu-24.04
+
+# Update WSL kernel (optional but recommended)
+wsl --update
+\end{bashcode}
+
+After rebooting and accessing Ubuntu, I created a new user, set a password, and granted administrative privileges (sudo) to prepare for package installation.
+
+\begin{bashcode}[title={Ubuntu: Granting Sudo Access}]
+# Grant sudo privileges to current user
+sudo usermod -aG sudo tung
+\end{bashcode}
+
+\subsection{ROS 2 Jazzy Jalisco Installation}
+The installation process followed the official documentation, including adding the GPG Key and repository.
+
+\begin{bashcode}[title={Ubuntu: ROS 2 Setup}]
+# 1. Setup Locale
+sudo apt update && sudo apt install locales
+sudo locale-gen en_US.UTF-8
+sudo update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
+export LANG=en_US.UTF-8
+
+# 2. Add GPG key
+sudo apt install software-properties-common curl
+sudo add-apt-repository universe
+sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
+
+# 3. Add Repository
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
+
+# 4. Install ROS 2 Desktop
+sudo apt update
+sudo apt install ros-jazzy-desktop ros-dev-tools
+\end{bashcode}
+
+\subsection{Environment Configuration (Sourcing)}
+To execute ROS 2 commands from any Terminal, I added the source command to the shell startup configuration file (\texttt{.bashrc}).
+
+\begin{bashcode}[title={Ubuntu: Configure .bashrc}]
+# Add sourcing command to .bashrc
+echo "source /opt/ros/jazzy/setup.bash" >> ~/.bashrc
+
+# Apply changes immediately
+source ~/.bashrc
+\end{bashcode}
+
+\subsection{Gazebo Harmonic and Simulation Packages Installation}
+Installing Gazebo Harmonic version and TurtleBot3 support packages.
+
+\begin{bashcode}[title={Ubuntu: Install Gazebo \& Packages}]
+# Install Gazebo Harmonic integration
+sudo apt install ros-jazzy-ros-gz
+
+# Install TurtleBot3 packages
+sudo apt install ros-jazzy-turtlebot3
+sudo apt install ros-jazzy-turtlebot3-simulations
+sudo apt install ros-jazzy-turtlebot3-gazebo
+sudo apt install ros-jazzy-teleop-twist-keyboard
+
+# Set robot model in .bashrc
+echo "export TURTLEBOT3_MODEL=burger" >> ~/.bashrc
+source ~/.bashrc
+\end{bashcode}

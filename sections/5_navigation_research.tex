@@ -1,0 +1,104 @@
+\section{Research on Navigation and Pathfinding Algorithms}
+
+\subsection{Problem Statement}
+Following the successful deployment of the simulation environment and manual control capabilities, the next phase of the project focuses on **Autonomous Navigation**. The primary objective is to enable the TurtleBot3 to autonomously plan a path and navigate from a starting point to a target destination within a known map, avoiding static and dynamic obstacles without human intervention.
+
+\subsection{Navigation 2 (Nav2) Stack Architecture}
+In ROS 2 Jazzy, the standard framework for autonomous mobile robots is the \textbf{Navigation 2 (Nav2)} stack. Nav2 utilizes Behavior Trees to manage complex navigation tasks and divides the pathfinding process into two distinct layers:
+
+\begin{itemize}
+    \item \textbf{Global Planner:} This component calculates the optimal path from the robot's current pose to the goal pose based on a static map. It considers the entire environment connectivity.
+    \item \textbf{Local Planner (Controller):} This component computes the immediate velocity commands ($v, \omega$) to follow the global path while avoiding unforeseen obstacles. It operates at a high frequency to ensure smooth motion.
+\end{itemize}
+
+\subsection{Pathfinding Algorithms Analysis}
+Based on the Nav2 technical documentation, I have identified the core algorithms that will be applied to the TurtleBot3 platform:
+
+\subsubsection{Global Planners (Path Finding)}
+These algorithms are managed by the \texttt{nav2\_planner} server:
+\begin{itemize}
+    \item \textbf{NavFn Planner:} This is the default planner for differential drive robots. It implements classical graph-search algorithms such as \textbf{Dijkstra} or \textbf{A* (A-Star)} on a costmap grid to find the shortest path. This is the most suitable choice for our current indoor simulation setup.
+    \item \textbf{Smac Planner:} An advanced planner that supports Hybrid-A*, designed for non-holonomic robots but also applicable to circular robots requiring high-precision planning.
+\end{itemize}
+
+\subsubsection{Local Planners (Path Tracking)}
+These algorithms are managed by the \texttt{nav2\_controller} server:
+\begin{itemize}
+    \item \textbf{DWB (Dynamic Window Approach):} An evolution of the classic DWA algorithm. It samples a set of achievable velocities, simulates the robot's trajectory for a short duration, and scores them based on criteria (distance to goal, distance to obstacles, alignment with global path). The trajectory with the highest score is executed.
+\end{itemize}
+
+\subsection{Implementation Plan and Usage}
+To implement autonomous navigation, the following steps are required within the ROS 2 environment:
+
+\textbf{Step 1: Package Installation}
+The Navigation 2 stack and SLAM (Simultaneous Localization and Mapping) tools must be installed.
+\begin{bashcode}[title={Install Nav2 and SLAM Toolbox}]
+# Install Navigation 2 Stack
+sudo apt install ros-jazzy-navigation2
+sudo apt install ros-jazzy-nav2-bringup
+
+# Install SLAM Toolbox for mapping
+sudo apt install ros-jazzy-slam-toolbox
+\end{bashcode}
+
+\textbf{Step 2: Map Generation (SLAM)}
+Before navigation can occur, the robot must explore the environment to create a static map using SLAM.
+\begin{bashcode}[title={Launch SLAM (Async Mode)}]
+# Launch SLAM Toolbox
+ros2 launch slam_toolbox online_async_launch.py
+\end{bashcode}
+\textit{Procedure:} While SLAM is running, use the teleop keyboard node to drive the robot around the environment until the map in RViz is complete.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\linewidth]{images/slam_done.png}
+    \caption{Completed SLAM Map of the TurtleBot3 World environment}
+    \label{fig:slam_done}
+\end{figure}
+
+\textbf{Step 3: Saving the Map}
+Once the map is fully constructed (as shown in Figure \ref{fig:slam_done}), it must be saved to the disk to serve as input for the Navigation stack.
+\begin{bashcode}[title={Save Map to Disk}]
+# Create a directory for maps (optional)
+mkdir -p ~/robot_maps
+
+# Save the map (this creates .pgm and .yaml files)
+ros2 run nav2_map_server map_saver_cli -f ~/robot_maps/my_map
+\end{bashcode}
+
+\textbf{Step 4: Launching Navigation}
+With the map saved, the navigation system is initialized.
+\begin{bashcode}[title={Execute Navigation}]
+# Launch Navigation with the saved map
+export TURTLEBOT3_MODEL=burger
+ros2 launch turtlebot3_navigation2 navigation2.launch.py use_sim_time:=True map:=$HOME/robot_maps/my_map.yaml
+\end{bashcode}
+
+\begin{figure}[H]
+    \centering
+    % Đảm bảo file nav_load.png nằm trong thư mục images
+    \includegraphics[width=0.9\linewidth]{images/nav_load.png}
+    \caption{Navigation stack initialized successfully with the static map loaded in RViz2}
+    \label{fig:nav_load}
+\end{figure}
+
+\textbf{Step 5: Operation in RViz}
+The navigation process is fully controlled via the RViz interface. To initiate autonomous movement, the following procedures must be performed:
+
+\begin{enumerate}
+    \item \textbf{Localization (2D Pose Estimate):}
+    Upon initialization, the robot's estimated position might not match the simulation. Select the \textbf{2D Pose Estimate} tool from the top toolbar, then click and drag on the map to manually align the robot's pose with its actual position in Gazebo.
+
+    \item \textbf{Commanding the Robot (Nav2 Goal):}
+    Select the \textbf{Nav2 Goal} tool. Click and drag at the desired destination on the map to set the target position and final orientation.
+\end{enumerate}
+
+\textbf{Result:} As shown in Figure \ref{fig:nav_path}, the Global Planner calculates the optimal path (visualized as a thin line), and the Local Planner drives the robot along this trajectory while dynamically avoiding obstacles.
+
+\begin{figure}[H]
+    \centering
+    % Bạn cần chụp cảnh robot đang đi theo đường xanh và lưu là images/nav_path.png
+    \includegraphics[width=0.9\linewidth]{images/nav_path.png}
+    \caption{TurtleBot3 autonomously following the global path (green line) to the goal}
+    \label{fig:nav_path}
+\end{figure}
