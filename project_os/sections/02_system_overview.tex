@@ -1,0 +1,119 @@
+\section{System Overview}
+\label{sec:system_overview}
+
+\subsection{Architecture}
+The system is built upon a modular ROS 2 architecture, designed to decouple the simulation environment from the autonomous navigation logic and the resource monitoring framework. Figure~\ref{fig:arch} illustrates the data flow and the interaction between components.
+
+The core pipeline consists of:
+\begin{enumerate}
+    \item \textbf{Simulation Layer:} Gazebo simulates the physical world and sensor physics (LiDAR, IMU).
+    \item \textbf{Bridge Layer:} \node{ros\_gz\_bridge} translates Gazebo transport messages into standard ROS 2 topics.
+    \item \textbf{Application Layer:} 
+    \begin{itemize}
+        \item \node{slam\_toolbox} performs simultaneous localization and mapping.
+        \item \node{reactive\_explorer} computes velocity commands based on sensor data.
+    \end{itemize}
+    \item \textbf{Experiment Layer:} \node{cpu\_hog} processes inject synthetic load, while \node{metrics\_runner} passively records performance data.
+\end{enumerate}
+
+% =========================
+% TikZ System Diagram
+% =========================
+\begin{figure}[H]
+    \centering
+    \resizebox{\linewidth}{!}{% Resize to fit page width
+    \begin{tikzpicture}[
+        node distance=1.5cm and 2cm,
+        % Node Styles
+        box/.style={
+            draw, rounded corners, minimum width=2.5cm, minimum height=1.2cm, 
+            align=center, font=\sffamily\small, drop shadow, very thick
+        },
+        sim/.style={box, fill=blue!10, draw=blue!60},
+        ros/.style={box, fill=orange!10, draw=orange!60},
+        tool/.style={box, fill=green!10, draw=green!60},
+        stress/.style={box, fill=red!10, draw=red!60, dashed},
+        % Edge Styles
+        arrow/.style={->, >=stealth, thick, color=darkgray, line width=1.2pt},
+        label/.style={font=\scriptsize\ttfamily, color=blue!60, fill=white, inner sep=1pt, sloped}
+    ]
+
+        % --- Nodes ---
+        
+        % 1. Simulation (Left)
+        \node[sim] (gazebo) {\textbf{Gazebo}\\(Simulated World)};
+        
+        % 2. Bridge (Center-Left)
+        \node[box, fill=gray!10, draw=gray!60, right=of gazebo] (bridge) {\textbf{ros\_gz\_bridge}};
+        
+        % 3. Logic Nodes (Center-Right)
+        \node[ros, above right=0.2cm and 2.5cm of bridge] (slam) {\textbf{slam\_toolbox}\\(Mapping)};
+        \node[ros, below right=0.2cm and 2.5cm of bridge] (explore) {\textbf{reactive\_explorer}\\(Navigation)};
+        
+        % 4. Visualization (Far Right)
+        \node[tool, right=2cm of slam] (rviz) {\textbf{RViz2}\\(GUI)};
+        
+        % 5. Stress & Metrics (Top/Bottom)
+        \node[stress, above=1.2cm of slam] (hog) {\textbf{cpu\_hog}\\(Interference)};
+        \node[tool, below=1.2cm of explore, dashed] (metrics) {\textbf{metrics\_runner}\\(Data Logger)};
+
+        % --- Connections ---
+        
+        % Gazebo <-> Bridge
+        \draw[arrow, <->] (gazebo) -- node[above, font=\scriptsize] {Sim Topics} (bridge);
+        
+        % Bridge -> SLAM (Path split)
+        \draw[arrow] (bridge.east) -- ++(0.5,0) |- node[label, pos=0.7] {/scan, /tf} (slam.west);
+        
+        % Bridge -> Explorer
+        \draw[arrow] (bridge.east) -- ++(0.5,0) |- node[label, pos=0.7] {/scan, /odom} (explore.west);
+        
+        % Explorer -> Bridge
+        \draw[arrow] (explore.west) -- ++(-0.5,0) |- node[label, pos=0.25] {/cmd\_vel} (bridge.south);
+        
+        % SLAM -> RViz
+        \draw[arrow] (slam.east) -- node[label] {/map} (rviz.west);
+        
+        % CPU Hog Attack (Wavy Line)
+        \draw[->, decorate, decoration={snake, amplitude=.5mm, segment length=3mm, post length=2mm}, draw=red, ultra thick] 
+            (hog) -- node[right, font=\scriptsize\bfseries, color=red, align=left] {Resource\\Contention} (slam);
+
+        % Metrics Logging (Dashed)
+        \draw[arrow, dashed, draw=gray!50] (bridge.south) |- (metrics.west);
+        \draw[arrow, dashed, draw=gray!50] (slam.south) |- (metrics.east);
+        
+        % Grouping Box
+        \node[draw=gray!30, dashed, fit=(slam) (explore) (bridge), inner sep=0.4cm, label={[gray]above:ROS 2 Context}] {};
+
+    \end{tikzpicture}
+    }
+    \caption{System architecture: Data flows from Gazebo through the bridge to SLAM and Explorer nodes. The \texttt{cpu\_hog} introduces artificial contention, affecting the SLAM node's performance.}
+    \label{fig:arch}
+\end{figure}
+
+\subsection{Nodes and Topics}
+Table~\ref{tab:nodes} details the primary nodes involved in the experiment and their respective communication interfaces.
+
+\begin{table}[H]
+\centering
+\caption{Main nodes and ROS interfaces.}
+\label{tab:nodes}
+\begin{tabular}{p{3.5cm} p{5.0cm} p{5.0cm}}
+\toprule
+\textbf{Node} & \textbf{Subscribes To} & \textbf{Publishes} \\
+\midrule
+\node{ros\_gz\_bridge} & (Gazebo internal topics) & \topic{/scan}, \topic{/odom}, \topic{/tf}, \topic{/clock} \\
+\midrule
+\node{slam\_toolbox} & \topic{/scan}, \topic{/tf} & \topic{/map}, \topic{/map\_metadata} \\
+\midrule
+\node{reactive\_explorer} & \topic{/scan}, \topic{/odom} & \topic{/cmd\_vel} \\
+\midrule
+\node{cpu\_hog\_*} & (None) & (None - Consumes CPU only) \\
+\midrule
+\node{metrics\_runner} & \topic{/scan}, \topic{/map} & (CSV Logs) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Resource Interactions}
+The critical interaction in this study is between \node{slam\_toolbox} and \node{cpu\_hog}. Since SLAM is computationally intensive (scan matching and graph optimization), it competes directly with the hog processes for CPU cycles. When the OS scheduler preempts the SLAM node to serve the hog, message processing is delayed, leading to the jitter and map degradation analyzed in Section~\ref{sec:results}.

@@ -1,0 +1,52 @@
+% sections/06_experiments.tex
+
+\section{Experimental Design and Metrics}
+\label{sec:experiments}
+
+To validate the proposed RL resource management approach, we designed a reproducible stress-test framework. This section details the protocol, the data collection metrics, and the execution commands.
+
+\subsection{Experimental Protocol}
+We define a standardized "episode" of 120 seconds to train and evaluate the agents. The episode is divided into three phases:
+
+\begin{enumerate}
+    \item \textbf{Phase 1: Warm-up (0-30s):} 
+    The robot explores an empty environment. No external load is applied. This establishes the baseline performance.
+    
+    \item \textbf{Phase 2: Contention Injection (30-90s):}
+    Synthetic load is introduced to simulate heavy background processing (e.g., image processing or complex planning).
+    \begin{itemize}
+        \item At $t=30s$: Launch \node{cpu\_hog\_1} ($\lambda=0.6$).
+        \item At $t=60s$: Launch \node{cpu\_hog\_2} ($\lambda=0.8$), pushing the system to saturation.
+    \end{itemize}
+    
+    \item \textbf{Phase 3: Recovery (90-120s):}
+    All hog processes are terminated. We observe how quickly the SLAM system recovers and stabilizes the map.
+\end{enumerate}
+
+\subsection{Evaluation Metrics}
+The quality of the resource management policy is measured using the following metrics:
+
+\begin{itemize}
+    \item \textbf{Topic Rate ($Hz$):} The frequency of messages on \topic{/scan}. A stable 5Hz is desired.
+    \item \textbf{Jitter ($\sigma_t$):} The standard deviation of the inter-message intervals ($\Delta t$).
+    \[ \text{Jitter} = \sqrt{\frac{1}{N} \sum_{i=1}^{N} (\Delta t_i - \overline{\Delta t})^2} \]
+    High jitter indicates scheduling instability, which is detrimental to SLAM.
+    \item \textbf{Map Quality (Qualitative):} Visual inspection of the generated occupancy grid for artifacts (ghost walls) or rotational drift.
+\end{itemize}
+
+\subsection{Reproduction Commands}
+The following commands were used to execute the experiments within the ROS 2 Jazzy workspace.
+
+\begin{lstlisting}[language=bash, caption=Commands to launch the simulation and metrics runner]
+# Terminal 1: Simulation Environment
+ros2 launch turtlebot3_gazebo turtlebot3_world.launch.py
+
+# Terminal 2: SLAM Node (Async Mode)
+ros2 launch slam_toolbox online_async_launch.py \
+  use_sim_time:=true \
+  slam_params_file:=./config/mapper_params_online_async.yaml
+
+# Terminal 3: Experiment Runner (includes RL Agent)
+# Flags: --policy can be [none, rule, bandit, qlearn]
+python3 experiment_runner.py --duration 120 --policy qlearn
+\end{lstlisting}

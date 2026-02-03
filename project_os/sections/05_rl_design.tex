@@ -1,0 +1,42 @@
+\section{Reinforcement Learning for Resource Management}
+\label{sec:rl_design}
+
+To mitigate the effects of CPU contention described in the previous section, we propose an intelligent resource allocator. Instead of static rules, we employ Reinforcement Learning (RL) agents to dynamically adjust process priorities (e.g., \textit{renice} commands) or throttle auxiliary nodes based on system states.
+
+\subsection{RL Framework Overview}
+The problem is modeled as a Markov Decision Process (MDP) or a simplified Bandit problem, where:
+\begin{itemize}
+    \item \textbf{Agent:} The Resource Manager.
+    \item \textbf{Environment:} The ROS 2 system (OS scheduler, Nodes).
+    \item \textbf{Action ($A$):} Adjusting process priorities (e.g., set SLAM to high priority, pause CPU hogs).
+    \item \textbf{Reward ($R$):} Based on \topic{/scan} rate stability and low jitter.
+\end{itemize}
+
+\begin{figure}[H]
+    \centering
+    % Placeholder cho ảnh sơ đồ RL
+    % \includegraphics[width=0.8\linewidth]{figures/rl_loop_diagram.png}
+    \includegraphics[width=1\linewidth]{figures/rl_loop.png}
+    \caption{The Reinforcement Learning loop applied to OS resource management.}
+    \label{figủerl_loop.png}
+\end{figure}
+
+\subsection{Multi-Armed Bandit (MAB) Approach}
+The Multi-Armed Bandit approach treats the problem as a single-state scenario. The agent assumes the environment's difficulty is constant and tries to find the single best action that maximizes the average reward.
+
+\subsubsection{Algorithm}
+We use the $\epsilon$-greedy strategy. With probability $\epsilon$, the agent explores a random action; otherwise, it exploits the best known action $a^*$:
+\begin{equation}
+    Q(a) \leftarrow Q(a) + \alpha \cdot (r - Q(a))
+\end{equation}
+where $Q(a)$ is the estimated value of action $a$, and $\alpha$ is the learning rate. This approach is computationally cheap but lacks context awareness (it doesn't know if the CPU is currently heavy or light).
+
+\subsection{Q-Learning Approach}
+Unlike MAB, Q-Learning accounts for the system \textbf{state} ($S$). The optimal action depends on the current contention level (e.g., "Is the CPU usage > 80\%?").
+
+\subsubsection{State Space and Bellman Equation}
+We discretize the state space into: \texttt{Safe}, \texttt{Warning}, and \texttt{Critical} based on topic jitter. The agent learns a Q-table $Q(s,a)$ updated via:
+\begin{equation}
+    Q(s,a) \leftarrow Q(s,a) + \alpha \left[ r + \gamma \max_{a'} Q(s', a') - Q(s,a) \right]
+\end{equation}
+By observing the state transition from $s$ to $s'$, the Q-Learning agent can learn anticipatory behaviors, such as throttling background tasks \textit{before} the map quality degrades significantly.

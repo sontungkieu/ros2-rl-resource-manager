@@ -1,0 +1,19 @@
+% =========================
+\section{Introduction}
+% =========================
+\subsection{Problem statement}
+Simultaneous Localization and Mapping (SLAM) is a core capability for mobile robots.
+However, SLAM performance is sensitive to real-time constraints: delayed sensor processing or dropped messages can degrade mapping quality and localization accuracy.
+This project builds a full ROS 2 simulation pipeline and measures how CPU contention affects:
+\begin{itemize}[nosep]
+  \item LiDAR scan throughput \topic{/scan} (rate and jitter),
+  \item Map publishing \topic{/map} (rate and jitter),
+  \item CPU utilization of key nodes (slam\_toolbox, ros\_gz\_bridge, cpu\_hog).
+\end{itemize}
+
+\subsection{Contributions}
+\begin{itemize}[nosep]
+  \item A ROS 2 workspace integrating TurtleBot3 simulation, SLAM Toolbox, and a reactive explorer node.
+  \item A metrics runner that schedules CPU loads and logs topic timing statistics and CPU usage over time.
+  \item An OS-focused analysis of contention, scheduling effects, and how resource policies can impact SLAM.
+\end{itemize}

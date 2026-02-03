@@ -1,0 +1,484 @@
+% % =========================
+% % main.tex (Overleaf-ready)
+% % =========================
+% \documentclass[11pt,a4paper]{article}
+
+% \usepackage[a4paper,margin=2.2cm]{geometry}
+% \usepackage[T1]{fontenc}
+% \usepackage[utf8]{inputenc}
+% \usepackage{lmodern}
+% \usepackage{microtype}
+
+% \usepackage{graphicx}
+% \usepackage{float}
+% \usepackage{subcaption}
+% \usepackage{booktabs}
+% \usepackage{siunitx}
+% \usepackage{hyperref}
+% \usepackage{xcolor}
+% \usepackage{enumitem}
+
+% \usepackage{algorithm}
+% \usepackage{algpseudocode}
+
+% \usepackage{listings}
+% \lstset{
+%   basicstyle=\ttfamily\small,
+%   breaklines=true,
+%   frame=single,
+%   columns=fullflexible,
+%   keywordstyle=\color{blue},
+%   commentstyle=\color{gray},
+%   stringstyle=\color{teal},
+% }
+
+% \hypersetup{
+%   colorlinks=true,
+%   linkcolor=blue,
+%   urlcolor=blue,
+%   citecolor=blue
+% }
+
+% \title{\textbf{ROS 2 SLAM + Resource Management Metrics}\\
+% \large TurtleBot3 (Gazebo + RViz2) with SLAM Toolbox and CPU Contention Experiments}
+% \author{
+%   Student: \textbf{[Your Name]} \\
+%   Class: \textbf{[Course / Section]} \\
+%   Instructor: \textbf{[Instructor Name]} \\
+%   University: \textbf{[HUST / Department]}
+% }
+% \date{\textbf{January 2026}}
+
+% \newcommand{\topic}[1]{\texttt{#1}}
+% \newcommand{\node}[1]{\texttt{#1}}
+% \newcommand{\param}[1]{\texttt{#1}}
+% \newcommand{\cmd}[1]{\texttt{#1}}
+
+% \begin{document}
+% \maketitle
+
+% \begin{abstract}
+% This report presents a ROS 2 (Jazzy) SLAM pipeline on TurtleBot3 simulation using Gazebo and RViz2.
+% We integrate (i) reactive exploration (obstacle avoidance + random walk), (ii) SLAM Toolbox online asynchronous mapping, and (iii) an OS-oriented experiment framework to inject CPU contention (cpu\_hog) and log system-level metrics (topic rates, jitter, CPU usage).
+% The goal is to understand how computational resource contention affects SLAM quality and runtime behavior, and to provide a foundation for future RL-based resource allocation policies.
+% \end{abstract}
+
+% \tableofcontents
+% \newpage
+
+
+
+% % =========================
+% \section{Main Content: Algorithms and Workflows}
+% % =========================
+% \subsection{Reactive exploration algorithm}
+% The explorer performs obstacle avoidance and random walk using sector-based minimum ranges from \topic{/scan}.
+% It outputs velocity commands \topic{/cmd\_vel}.
+
+% \begin{algorithm}[H]
+% \caption{Reactive Exploration (Obstacle Avoidance + Wander)}
+% \begin{algorithmic}[1]
+% \Require LiDAR scan ranges, thresholds $(d_\text{front}, d_\text{side})$, speeds $(v, \omega)$
+% \State Compute sector minimum distances: $front, left, right$
+% \If{$front < d_\text{front}$}
+%   \State Stop linear motion
+%   \State Turn away from closer side (choose $\omega$ sign based on $left$ vs $right$)
+% \Else
+%   \State Move forward with speed $v$
+%   \If{$left < d_\text{side}$} \State Turn right slightly \EndIf
+%   \If{$right < d_\text{side}$} \State Turn left slightly \EndIf
+%   \State Occasionally add a gentle arc turn (wander) to improve coverage
+% \EndIf
+% \State Publish \topic{/cmd\_vel}
+% \end{algorithmic}
+% \end{algorithm}
+
+% \subsection{SLAM Toolbox mapping workflow}
+% We use \textbf{SLAM Toolbox} in \textbf{online asynchronous mapping} mode.
+% At runtime:
+% \begin{enumerate}[nosep]
+%   \item \topic{/scan} is time-synchronized with TF transforms.
+%   \item Scan matching estimates incremental motion (local consistency).
+%   \item A pose graph is updated; loop closing may trigger optimization.
+%   \item An occupancy grid map \topic{/map} is periodically published.
+% \end{enumerate}
+
+% \subsection{Saving and continuing a SLAM map}
+% We record and reuse maps through:
+% \begin{itemize}[nosep]
+%   \item \textbf{Map saving}: store \topic{/map} as occupancy grid (e.g., map\_server / map\_saver) and optionally save SLAM state depending on toolbox features.
+%   \item \textbf{Continue mapping}: start slam\_toolbox with the same map/state (if supported) and keep updating.
+% \end{itemize}
+
+% \subsection{Dynamic obstacles and map quality}
+% In simulation, moving obstacles introduce inconsistent measurements.
+% Typical effects:
+% \begin{itemize}[nosep]
+%   \item ghost artifacts in occupancy grid,
+%   \item scan matching outliers,
+%   \item loop closure false positives/negatives.
+% \end{itemize}
+% Mitigation: conservative motion, filtering/temporal persistence, robust scan matching settings, and ensuring real-time throughput to reduce drops.
+
+% \subsection{Expanding from one-room to whole-house mapping}
+% Scaling up requires:
+% \begin{itemize}[nosep]
+%   \item reliable exploration strategy (coverage + loop closures),
+%   \item sufficient TF stability and scan throughput,
+%   \item map resolution tradeoffs (memory/CPU),
+%   \item larger pose graph (more optimization cost).
+% \end{itemize}
+
+% % =========================
+% \section{Program Interface: Inputs, Outputs, and Parameters}
+% % =========================
+% \subsection{Inputs and outputs}
+% \textbf{Inputs}
+% \begin{itemize}[nosep]
+%   \item \topic{/scan}: \texttt{sensor\_msgs/LaserScan} (from ros\_gz\_bridge)
+%   \item \topic{/tf}, \topic{/odom}: transforms and odometry (from ros\_gz\_bridge)
+% \end{itemize}
+
+% \textbf{Outputs}
+% \begin{itemize}[nosep]
+%   \item \topic{/cmd\_vel}: velocity commands from reactive explorer
+%   \item \topic{/map}: occupancy grid published by SLAM Toolbox
+% \end{itemize}
+
+% \subsection{Key SLAM parameters (example)}
+% Table~\ref{tab:slam_params} highlights parameters that strongly affect compute load and output behavior.
+
+% \begin{table}[H]
+% \centering
+% \begin{tabular}{p{5.0cm} p{3.2cm} p{5.6cm}}
+% \toprule
+% \textbf{Parameter} & \textbf{Example} & \textbf{Effect} \\
+% \midrule
+% \param{map\_update\_interval} & 0.2--1.0 & Smaller $\rightarrow$ publish map more often (higher CPU/IO). \\
+% \param{resolution} & 0.02--0.05 & Smaller $\rightarrow$ larger map grids (more CPU/memory). \\
+% \param{throttle\_scans} & 1 & Larger $\rightarrow$ process fewer scans (less CPU). \\
+% \param{minimum\_time\_interval} & 0.1--0.5 & Smaller $\rightarrow$ update more frequently. \\
+% \param{do\_loop\_closing} & true/false & true increases optimization cost when revisiting areas. \\
+% \bottomrule
+% \end{tabular}
+% \caption{Parameters that influence compute load and runtime behavior.}
+% \label{tab:slam_params}
+% \end{table}
+
+% % =========================
+% \section{OS Resource Management and Contention}
+% % =========================
+% \subsection{What is contention?}
+% \textbf{Contention} occurs when multiple processes compete for limited resources (CPU, memory bandwidth, cache, IO), causing increased latency, scheduling delays, and throughput reduction.
+% In ROS 2, contention often appears as:
+% \begin{itemize}[nosep]
+%   \item lower topic rates (e.g., \topic{/scan}),
+%   \item higher jitter (std of inter-message intervals),
+%   \item message queue overflow and dropped messages,
+%   \item delayed transforms and time synchronization failures.
+% \end{itemize}
+
+% \subsection{CPU hog mechanism}
+% We create synthetic contention using \node{cpu\_hog} processes, each configured with a load factor $0 < \lambda \le 1$.
+% The hog simulates CPU-bound work to reduce available CPU cycles for SLAM and bridge nodes.
+
+% \subsection{Scheduling controls}
+% Potential OS-level levers:
+% \begin{itemize}[nosep]
+%   \item \textbf{nice} / \textbf{priority}: bias CPU scheduling in favor of critical nodes.
+%   \item \textbf{CPU affinity}: bind nodes to specific cores (repeatable experiments).
+%   \item \textbf{CPU quotas / cgroups}: enforce hard limits per process group (availability depends on environment).
+% \end{itemize}
+
+% % =========================
+% \section{Experiments and Metrics}
+% % =========================
+% \subsection{Experimental protocol}
+% We run Gazebo + RViz2 + SLAM Toolbox + explorer, then execute metrics runner:
+% \begin{enumerate}[nosep]
+%   \item Start with no hogs for baseline window.
+%   \item Add hog processes according to a schedule (loads list), every \param{step} seconds after \param{start-after}.
+%   \item Continuously log topic statistics and CPU usage into CSV.
+%   \item Generate plots with vertical markers at hog start times.
+% \end{enumerate}
+
+% \subsection{Metrics}
+% We log:
+% \begin{itemize}[nosep]
+%   \item Topic rate (Hz) for \topic{/scan}, \topic{/map}
+%   \item Inter-message timing stats: min/max/std of $\Delta t$
+%   \item Message age (approx): time since last received message
+%   \item CPU usage (\%) of slam\_toolbox, ros\_gz\_bridge, and total hogs
+% \end{itemize}
+
+% \subsection{Commands to reproduce}
+% \textbf{Build}
+% \begin{lstlisting}[language=bash]
+% cd ~/slam_rl_ws
+% source /opt/ros/jazzy/setup.bash
+% colcon build --symlink-install
+% source install/setup.bash
+% \end{lstlisting}
+
+% \textbf{Run (example terminals)}
+% \begin{lstlisting}[language=bash]
+% # Terminal 1: Gazebo
+% export TURTLEBOT3_MODEL=burger
+% ros2 launch turtlebot3_gazebo turtlebot3_world.launch.py
+
+% # Terminal 2: RViz
+% ros2 run rviz2 rviz2
+
+% # Terminal 3: SLAM Toolbox
+% ros2 launch slam_toolbox online_async_launch.py \
+%   use_sim_time:=true \
+%   slam_params_file:=/home/tung/mapper_params_online_async.yaml
+
+% # Terminal 4: Explorer
+% ros2 run tb3_reactive_explorer reactive_explorer
+
+% # Terminal 5: Metrics runner
+% python3 ~/slam_rl_ws/experiment_metrics.py --loads 0.6,0.8 \
+%   --start-after 10 --step 20 --duration 120
+% \end{lstlisting}
+
+% % =========================
+% \section{Results and Discussion}
+% % =========================
+% \subsection{Quantitative results}
+% Insert your plot generated by metrics runner:
+% \begin{figure}[H]
+%   \centering
+%   \includegraphics[width=0.95\linewidth]{figures/metrics_plot.png}
+%   \caption{Example metrics plot: \topic{/scan} and \topic{/map} rates, jitter, and CPU usage under increasing hog load. Vertical lines indicate when a new hog starts.}
+%   \label{fig:metrics}
+% \end{figure}
+
+% \subsection{Qualitative observations in RViz}
+% Under contention, you may observe:
+% \begin{itemize}[nosep]
+%   \item map updates become less smooth,
+%   \item scan visualization lags behind robot motion,
+%   \item mapping artifacts increase when motion continues despite delayed updates.
+% \end{itemize}
+
+% \subsection{Why contention degrades mapping}
+% Mapping quality depends on consistent time alignment between \topic{/scan} and TF.
+% When CPU is saturated:
+% \begin{itemize}[nosep]
+%   \item TF cache may not contain transforms for old scan timestamps,
+%   \item message filters drop scans due to queue overflow,
+%   \item delayed optimization produces stale or jittery map updates.
+% \end{itemize}
+
+% % =========================
+% \section{RL for Resource Management}
+% % =========================
+% \subsection{Motivation}
+% An RL agent can learn a policy to allocate CPU priorities or quotas to maximize mapping stability (topic throughput, reduced jitter, and reduced message drops).
+
+% % =========================
+% \subsection{Experimental Design (RL Training under CPU Contention)}
+% % =========================
+
+% \subsubsection{Objective and hypothesis}
+% The objective of this experiment is to stress the SLAM pipeline under controlled CPU contention and train an RL policy to mitigate performance degradation.
+% We hypothesize that increasing CPU contention reduces sensor and mapping throughput (lower Hz) and increases timing jitter (higher std of $\Delta t$), which correlates with visually degraded maps in RViz.
+% An RL-based resource management policy should learn to allocate resources (e.g., priorities/quotas) to improve stability and reduce degradation under repeated contention cycles.
+
+% \subsubsection{Hardware and environment setup}
+% All experiments are executed in a Windows + WSL2 environment to mimic constrained robot hardware.
+% We intentionally limit available resources:
+% \begin{itemize}[nosep]
+%   \item \textbf{CPU cores:} WSL configured to \textbf{1 core}.
+%   \item \textbf{RAM:} WSL configured to \textbf{4 GB}.
+%   \item \textbf{Software:} ROS 2 Jazzy, Gazebo simulation, RViz2 visualization, SLAM Toolbox (online async mode).
+% \end{itemize}
+% This setup increases the chance of contention effects and makes resource-management improvements easier to observe.
+
+% \subsubsection{Stress test strategy: pushing SLAM to its limits}
+% To push SLAM to its computational limits, we combine:
+% \begin{itemize}[nosep]
+%   \item \textbf{Aggressive SLAM parameters} (e.g., frequent map updates and/or higher scan-matching load),
+%   \item \textbf{Synthetic CPU contention} using multiple \texttt{cpu\_hog} processes,
+%   \item \textbf{Real-time metric monitoring} to quantify throughput and jitter changes.
+% \end{itemize}
+
+% \subsubsection{Contestion schedule for training RL}
+% We implement a repeating contention schedule to generate a training signal for RL.
+% Each episode consists of a baseline segment, a staged load segment, and a recovery segment.
+
+% \paragraph{Episode timeline.}
+% Let $x$ be the interval between staged hog starts, $y$ be the hog active duration, $u$ be the recovery time after all hogs stop, and $n$ be the number of repeated episodes for training:
+% \begin{itemize}[nosep]
+%   \item Start in baseline conditions (no hog) for an initial warm-up window.
+%   \item Launch \textbf{hog 1}, then after $x$ seconds launch \textbf{hog 2}, then after another $x$ seconds launch \textbf{hog 3}.
+%   \item Each hog runs for $y$ seconds (or until a configured global end of the load stage).
+%   \item After the hog stage, stop all hog processes and let the system recover for $u$ seconds.
+%   \item Repeat the entire episode for $n$ iterations to collect experiences for RL training.
+% \end{itemize}
+
+% \paragraph{Why staged loads?}
+% Staged loads emulate a realistic scenario where background computation gradually increases.
+% This is more representative than a single-step load and also improves the diversity of training data.
+% It also enables the policy to learn \emph{anticipatory} behavior (reacting before the system becomes unstable).
+
+% \subsubsection{Metrics collected}
+% During training and evaluation, we continuously log:
+% \begin{itemize}[nosep]
+%   \item \topic{/scan} and \topic{/map} rate (Hz),
+%   \item inter-message interval statistics ($\Delta t$: min / max / std),
+%   \item message age (time since last message for each topic),
+%   \item CPU usage (\%) of critical processes: \texttt{slam\_toolbox}, \texttt{ros\_gz\_bridge}, and aggregate hog CPU.
+% \end{itemize}
+
+% \subsubsection{Evaluation protocol: baselines vs. RL}
+% We compare multiple policies under the same episode schedule:
+% \begin{itemize}[nosep]
+%   \item \textbf{None:} no resource control (default scheduling).
+%   \item \textbf{Rule-based:} fixed heuristics (e.g., prioritize SLAM when /scan Hz drops below threshold).
+%   \item \textbf{RL policy:} learned allocation strategy trained over $n$ episodes.
+% \end{itemize}
+
+% For fair comparison, each policy is evaluated across identical contention schedules and averaged over multiple runs.
+% We report both quantitative metrics (rate/jitter/CPU) and qualitative RViz observations (map stability, visible lag, artifacts).
+
+% \subsection{Acknowledgements and Limitations: Why RL may not help}
+% RL may provide limited benefit when:
+% \begin{itemize}[nosep]
+%   \item contention is weak or bottleneck is not CPU,
+%   \item reward signals are noisy or delayed,
+%   \item environment is highly non-stationary (loads change faster than learning).
+% \end{itemize}
+
+% \subsubsection{Acknowledgements}
+% We acknowledge the ROS 2 and open-source robotics community for providing robust simulation and SLAM tools.
+% In particular, TurtleBot3 simulation packages, Gazebo integration, and SLAM Toolbox enable reproducible SLAM experiments in a software-only environment.
+
+% \subsubsection{Limitations and sources of uncertainty}
+% This project is evaluated in a Windows + WSL2 environment, which introduces several sources of uncertainty:
+% \begin{itemize}[nosep]
+%   \item \textbf{Complex Windows--WSL resource management:} CPU core assignment and scheduling behavior in WSL2 can be difficult to interpret precisely and may differ from native Linux behavior.
+%   \item \textbf{Background interference from Windows:} CPU time may be simultaneously consumed by other Windows processes, causing small fluctuations in measured performance and CPU usage.
+%   \item \textbf{ROS 2 system complexity:} The end-to-end pipeline involves multiple nodes (simulation, bridge, SLAM, visualization), each with its own timing and buffering behavior. Therefore, minor variations in timing (e.g., message drops due to filter queues) can occur even under similar settings.
+% \end{itemize}
+
+% Despite these limitations, repeated experiments with controlled contention schedules (and averaging across multiple episodes) still provide meaningful insight into how CPU contention impacts SLAM and how resource-management strategies can improve stability.
+
+
+% % =========================
+% \section{Teamwork and Contributions}
+% % =========================
+% \begin{itemize}[nosep]
+%   \item \textbf{Member A:} Implemented reactive explorer node, tested motion in Gazebo.
+%   \item \textbf{Member B:} Integrated SLAM Toolbox parameters, debugging TF/time issues.
+%   \item \textbf{Member C:} Implemented metrics runner, CPU hog scheduling, plotting.
+%   \item \textbf{Member D:} Report writing, experiment design, results interpretation.
+% \end{itemize}
+
+% % =========================
+% \section{Conclusion}
+% % =========================
+% We implemented a full ROS 2 SLAM simulation pipeline and a reproducible contention experiment framework.
+% Results show that CPU contention can reduce sensor throughput and increase jitter, degrading SLAM mapping stability.
+% This framework is suitable for OS-focused resource management analysis and can be extended with RL-based policies.
+
+
+
+% % =========================
+% \bibliographystyle{ieeetr}
+% \bibliography{references}
+
+% \end{document}
+
+% =========================
+% main.tex (Overleaf-ready)
+% =========================
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[a4paper,margin=2.2cm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+
+\usepackage{graphicx}
+\usepackage{tikz}
+\usetikzlibrary{positioning,shadows,decorations.pathmorphing,fit}
+\usepackage{float}
+\usepackage{subcaption}
+\usepackage{booktabs}
+\usepackage{siunitx}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{enumitem}
+
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+
+\usepackage{listings}
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  columns=fullflexible,
+  keywordstyle=\color{blue},
+  commentstyle=\color{gray},
+  stringstyle=\color{teal},
+}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue,
+  urlcolor=blue,
+  citecolor=blue
+}
+
+% Custom commands
+\newcommand{\topic}[1]{\texttt{#1}}
+\newcommand{\node}[1]{\texttt{#1}}
+\newcommand{\param}[1]{\texttt{#1}}
+\newcommand{\cmd}[1]{\texttt{#1}}
+
+% Title Info
+\title{\textbf{ROS 2 SLAM + Resource Management Metrics}\\
+\large TurtleBot3 (Gazebo + RViz2) with SLAM Toolbox and CPU Contention Experiments}
+\author{
+  Student: \textbf{[Your Name]} \\
+  Class: \textbf{[Course / Section]} \\
+  Instructor: \textbf{[Instructor Name]} \\
+  University: \textbf{[HUST / Department]}
+}
+\date{\textbf{January 2026}}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This report presents a ROS 2 (Jazzy) SLAM pipeline on TurtleBot3 simulation using Gazebo and RViz2.
+We integrate (i) reactive exploration (obstacle avoidance + random walk), (ii) SLAM Toolbox online asynchronous mapping, and (iii) an OS-oriented experiment framework to inject CPU contention (cpu\_hog) and log system-level metrics (topic rates, jitter, CPU usage).
+The goal is to understand how computational resource contention affects SLAM quality and runtime behavior, and to provide a foundation for future RL-based resource allocation policies.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+% =========================
+% Importing Sections
+% =========================
+
+\input{sections/01_introduction}
+\input{sections/02_system_overview}
+\input{sections/03_algorithms}
+\input{sections/04_interface}
+\input{sections/05_rl_design}
+\input{sections/06_experiments}
+\input{sections/07_results}   % <--- Phần bạn quan tâm nhất
+
+% =========================
+% Bibliography
+% =========================
+\bibliographystyle{ieeetr}
+\bibliography{references}
+
+\end{document}

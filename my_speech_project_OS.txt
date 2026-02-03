@@ -1,0 +1,50 @@
+Slide 1: Title Slide (0:00 - 0:45)
+"Good morning/afternoon everyone. We are Group 19. My name is [Tên bạn], and along with my teammates [Tên các bạn khác], we are here to present our research on 'ROS 2 SLAM Resource Management using Reinforcement Learning.'
+
+Our project focuses on a critical issue in autonomous robotics: How do we keep the robot 'smart' and safe when its computer is overloaded? We attempt to solve this using Reinforcement Learning in a simulated environment."
+
+Slide 2: Outline (0:45 - 1:15)
+"Here is the roadmap for our presentation. We will start by briefly introducing ROS 2. Then, we will dive deep into the Problem Statement—specifically why standard operating systems fail robotics. Next, we describe our Experimental Setup and the RL Algorithms (Bandit vs. Q-Learning). Finally, we will analyze the Results, paying close attention to the learning behavior, and discuss the limitations."
+
+Slide 3: Introduction to ROS 2 (1:15 - 2:00)
+"First, a quick overview of ROS 2. It is the standard middleware for robotics. It works by breaking down complex tasks into independent Nodes—like sensing, planning, and mapping. These nodes communicate via Topics. For this project, our 'Main Character' is the SLAM Toolbox node, which is responsible for building the map in real-time. One key thing to remember: In ROS 2, these nodes rely on the underlying OS to get CPU time. They don't magically get resources."
+
+Slide 4: Problem Statement - Deep Dive (2:00 - 4:00) [TRỌNG TÂM]
+(Chỉ vào slide) "This leads us to the core problem: Resource Contention.
+
+To understand why this happens, we need to look at how Linux works. Standard Linux uses something called the CFS (Completely Fair Scheduler). Its goal is to be 'fair'—giving every process an equal slice of the CPU cake.
+
+However, a robot is NOT a democracy. The SLAM node is critical; if it stops, the robot gets lost. A data logging node or an image compression node is optional. The problem is: The Operating System doesn't know this difference. When we launch a heavy background task (what we call a 'CPU Hog'), the scheduler sees it as just another process demanding attention. It creates a queue, and the SLAM node gets stuck waiting in line.
+
+This leads to Starvation. The SLAM node wakes up late, processes old sensor data, and the whole system desynchronizes. We need a manager that can step in and say: 'No, SLAM goes first.'"
+
+Slide 5: Map Drift Visualization (4:00 - 5:00)
+"What does this starvation look like visually? Please look at this image of Map Drift. Here, the robot physically turned, but because the CPU was busy, the SLAM node processed the laser scan too late. It matched the new laser scan with the old robot position. The result is these 'ghost walls' and misalignment. Once a map drifts like this, it is permanently broken. The robot cannot navigate anymore."
+
+Slide 6: Experimental Setup (5:00 - 6:00)
+"To solve this, we set up a controlled experiment in Gazebo with a TurtleBot3. We introduced synthetic 'CPU Hog' processes to act as the villain, consuming 60 to 100% of the CPU. We then measured performance using Jitter—which is the variance in message timing. Why Jitter? Because for SLAM, consistency is more important than raw speed. A steady 5Hz is better than a bursty 10Hz. Our proposed solution is an RL Agent that monitors this jitter and dynamically adjusts process priorities (using the renice command)."
+
+Slide 7: RL Approach (6:00 - 7:00)
+"We compared two decision-making strategies: 1. Multi-Armed Bandit: This is a stateless approach. It tries to find one 'best' action (like 'Always High Priority') and sticks to it. It’s simple but blind to the changing environment. 2. Q-Learning: This is state-aware. We defined 3 states: Safe, Warning, and Critical based on the current jitter. This allows the agent to be proactive. It learns a policy like: 'If I see Warning signs, I throttle the Hog immediately before things get Critical.'"
+
+Slide 8: Results Table (7:00 - 8:00)
+"Now, let's look at the numbers. Under heavy contention (2 Hog processes), the Baseline failed completely, with jitter hitting 120ms. The map was unusable. Rule-based logic helped but was unstable. Q-Learning was the clear winner. It kept jitter down to 25ms and maintained a scan rate of 1.5 Hz even under 100% load. This result proves that dynamic allocation works."
+
+Slide 9: Performance Graphs - Deep Dive (8:00 - 9:30) [TRỌNG TÂM]
+(Chỉ vào biểu đồ bên phải - Q-Learning) "I want to draw your attention to the Q-Learning graph on the right.
+
+Please look at the moment the CPU Hog starts. You will notice there is still a sharp initial drop in performance (a spike in jitter) right at the beginning of the contention phase. Why does this happen? This is because RL is a reactive control loop. There is a small delay—a fraction of a second—between the Hog launching, the jitter spiking, and the Agent receiving that state update to take action. It is not magic; it cannot predict the future perfectly.
+
+However, the key difference is the Recovery. While the Baseline (no control) stays down at the bottom, the Q-Learning agent detects this drop immediately, applies the penalty, and switches the Hog to low priority. Within a few steps, the performance bounces back to the optimal level and stays flat. This stability is what we are looking for."
+
+Slide 10: Limitations (9:30 - 10:15)
+"Of course, our experiment has limitations.
+
+We ran this on WSL2, which is not a real-time OS. The Windows host introduces unpredictable noise.
+
+We used Virtual Cores, so we couldn't strictly isolate CPUs like on bare-metal hardware.
+
+ROS 2 has internal buffers that we cannot control directly. Despite these, the relative improvement is undeniable."
+
+Slide 11: Conclusion (10:15 - 10:30)
+"In conclusion, we showed that while Linux's fair scheduler fails robotics under load, a Q-Learning agent can effectively reclaim resources for critical nodes. It creates a robust system that can survive CPU spikes. Thank you for listening. We are happy to take any questions."

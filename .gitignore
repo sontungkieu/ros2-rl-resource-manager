@@ -20,6 +20,7 @@
 *.run.xml
 *.bcf
 *.listing
+*.zip
 
 # Generated PDFs (uncomment to ignore compiled PDFs)
 # *.pdf

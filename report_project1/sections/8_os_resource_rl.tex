@@ -1,0 +1,73 @@
+\section{Resource Management with Reinforcement Learning}
+\label{sec:rl_resource}
+
+Beyond navigation on a stable host, I evaluated how ROS 2 SLAM behaves when the operating system is overloaded and applied Reinforcement Learning (RL) to mitigate resource contention.
+
+\subsection{Problem and Symptoms}
+ROS 2 nodes share CPU fairly under Linux CFS, so critical nodes (e.g., \texttt{slam\_toolbox}) compete equally with background tasks. The scheduler slices CPU time without knowing task importance, so bursts of background work push SLAM off-core, delaying scans and creating map drift (ghost walls). Injecting CPU hogs (60--100\% load) on WSL2 caused delayed scan processing and map drift, effectively breaking navigation.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.75\linewidth]{images/drift.png}
+    \caption{SLAM map drift when CPU contention delays scan processing.}
+    \label{fig:drift}
+\end{figure}
+
+\subsection{Experiment Setup}
+\begin{itemize}
+    \item \textbf{Platform:} Windows 11 + WSL2 on i5-9300H, 16GB RAM; VM constrained to 1 vCPU, 4GB; ROS 2 Jazzy, Gazebo Harmonic, TurtleBot3 simulation, SLAM Toolbox (online async), RViz2.
+    \item \textbf{SLAM stress config:} \texttt{mapper\_params\_online\_async.yaml} set to aggressive values to raise CPU load: \texttt{resolution} 0.01, \texttt{map\_update\_interval} 0.1s, \texttt{minimum\_time\_interval} 0.5s, loop closing enabled with fine resolutions (\texttt{correlation\_search\_space\_resolution} 0.005, \texttt{coarse\_angle\_resolution} 0.0349), \texttt{transform\_publish\_period} 0.02s.
+    \item \textbf{Load Injection:} Synthetic \texttt{cpu\_hog} (tight compute loop, configurable duty 60--100\%) scheduled during 120s runs; metrics logged: \texttt{/scan} rate, jitter (std of $\Delta t$), CPU usage.
+    \item \textbf{Control Space:} Adjust process priorities via \texttt{renice}: raise \texttt{slam\_toolbox} (e.g., nice $-5$ to $-10$), lower hogs (e.g., nice $10$ to $15$). No kernel mods—pure user-space priority tuning.
+\end{itemize}
+
+\subsection{RL Approaches}
+\begin{itemize}
+    \item \textbf{Bandit ($\epsilon$-greedy):} Stateless; learns a single best priority action by updating $Q(a)$ with recent rewards. Fast but blind to changing contention.
+    \item \textbf{Q-Learning:} State-aware with three states (Safe/Warning/Critical) defined by jitter; updates $Q(s,a)$ to consider future impact, so it can pre-emptively lower hog priority when jitter rises.
+\end{itemize}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\linewidth]{images/bandit.png}
+    \caption{Bandit vs. Baseline: improved but still reactive.}
+    \label{fig:bandit}
+\end{figure}
+
+\subsection{Key Results}
+\begin{itemize}
+    \item \textbf{Baseline (no control):} Scan rate collapsed to $\sim$2.5Hz with sub-second jitter spikes; map unusable.
+    \item \textbf{Bandit:} Stabilized scan rate $\sim$4.2Hz but jitter during hog phases remains high, peaking around $0.6$\,s std($\Delta t$) (Fig.~\ref{fig:bandit}); map still noisy.
+    \item \textbf{Q-Learning:} Held scan rate $\sim$4.8Hz; after the initial spike, jitter settles around $0.2$--$0.3$\,s std($\Delta t$) (Fig.~\ref{fig:qlearning}); SLAM keeps more CPU and map stays usable.
+\end{itemize}
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{lccc}
+        \toprule
+        \textbf{Method} & \textbf{Scan Rate (Hz)} & \textbf{Jitter (ms)} & \textbf{Map Quality} \\
+        \midrule
+        Baseline (None) & $1.0 \pm 0.8$ & $\sim 800$ & Poor (Drift) \\
+        Rule-based      & $1.1 \pm 0.5$ & $\sim 600$ & Medium \\
+        Bandit (MAB)    & $1.3 \pm 0.2$ & $\sim 600$ & Medium-High \\
+        \textbf{Q-Learning} & $\mathbf{1.5 \pm 0.2}$ & $\sim 250$ & High (Stable) \\
+        \bottomrule
+    \end{tabular}
+    \caption{Estimated performance during a 120s contention episode from Figures~\ref{fig:bandit} and \ref{fig:qlearning}. Jitter is the std of inter-scan arrival times; lower is better.}
+    \label{tab:os_rl_metrics}
+\end{table}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\linewidth]{images/Q.png}
+    \caption{Q-Learning recovers quickly after contention spikes and stabilizes throughput.}
+    \label{fig:qlearning}
+\end{figure}
+
+\subsection{Limitations and Next Steps}
+\begin{itemize}
+    \item WSL2 and Windows host noise limit determinism; real hardware or RTOS would give cleaner baselines.
+    \item The TurtleBot3 world is relatively simple; in cluttered or real environments, map drift and contention effects would appear sooner.
+    \item RL is reactive; initial spikes still occur before the agent intervenes.
+    \item Future work: integrate policy with Nav2 controller priorities or cgroups, expand state to include SLAM timing/TF delays, and validate sim-to-real transfer.
+\end{itemize}
