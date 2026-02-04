@@ -44,10 +44,10 @@ Or with custom simulation time and parameters:
 source ~/slam_rl_ws/install/setup.bash
 ros2 launch slam_toolbox online_async_launch.py \
   use_sim_time:=true \
-  slam_params_file:=/home/tung/slam_rl_ws/mapper_params_online_async.yaml
+  slam_params_file:=$HOME/slam_rl_ws/mapper_params_online_async.yaml
   
 ```
-*(Note: Run this from the workspace root where the params file is located)*
+*(Note: `slam_params_file` dùng đường dẫn tuyệt đối nên có thể chạy ở bất kỳ thư mục nào.)*
 
 ### Terminal 3: Explorer Agent
 Runs the reactive exploration node to fetch sensor data and drive the robot.
@@ -106,8 +106,68 @@ python3 experiment_metrics.py \
 The script will produce a CSV and PNG in `metrics_out/` and print a summary table comparing performance across episodes.
 
 ### Saving the Map
-To save the generated map to disk:
+To save the generated map into this repo (recommended):
 ```bash
 source ~/slam_rl_ws/install/setup.bash
-ros2 run nav2_map_server map_saver_cli -f ~/my_map
+mkdir -p ~/slam_rl_ws/maps
+ros2 run nav2_map_server map_saver_cli -f ~/slam_rl_ws/maps/my_map
+```
+
+## Nav2 (Load Map + Navigate)
+
+After creating and saving a map with SLAM Toolbox, stop SLAM Toolbox and launch Nav2 with the saved map:
+
+```bash
+source ~/slam_rl_ws/install/setup.bash
+export TURTLEBOT3_MODEL=burger
+ros2 launch turtlebot3_navigation2 navigation2.launch.py \
+  use_sim_time:=True \
+  map:=$HOME/slam_rl_ws/maps/my_map.yaml
+```
+
+In RViz:
+- Use **2D Pose Estimate** once to initialize AMCL.
+- Use **Nav2 Goal** to send a navigation target.
+
+### Dynamic Obstacles (Moving Objects)
+
+This workspace includes a small helper package that spawns a few moving box obstacles in Gazebo Sim and moves them continuously. Nav2 should detect them via `/scan` and re-plan / avoid.
+
+Run only the obstacle spawner/mover:
+```bash
+source ~/slam_rl_ws/install/setup.bash
+ros2 run tb3_nav2_dynamic dynamic_obstacles --ros-args -p use_sim_time:=true
+```
+
+Or run a single launch that starts Gazebo + Nav2 + dynamic obstacles:
+```bash
+source ~/slam_rl_ws/install/setup.bash
+export TURTLEBOT3_MODEL=burger
+ros2 launch tb3_nav2_dynamic nav2_dynamic.launch.py map:=$HOME/slam_rl_ws/maps/my_map.yaml
+```
+
+If you already have Gazebo running, don’t start a second instance:
+```bash
+source ~/slam_rl_ws/install/setup.bash
+export TURTLEBOT3_MODEL=burger
+ros2 launch tb3_nav2_dynamic nav2_dynamic.launch.py \
+  start_gazebo:=false \
+  map:=$HOME/slam_rl_ws/maps/my_map.yaml
+```
+
+If you see errors like `Invalid frame ID "map"` or AMCL asking to set initial pose, either:
+- Use RViz **2D Pose Estimate**, or
+- Keep `auto_initial_pose:=true` (default) in `nav2_dynamic.launch.py` and adjust spawn pose if needed:
+```bash
+ros2 launch tb3_nav2_dynamic nav2_dynamic.launch.py \
+  robot_x:=-2.0 robot_y:=-0.5 robot_yaw:=0.0 \
+  map:=$HOME/slam_rl_ws/maps/my_map.yaml
+```
+
+If you see `Robot is out of bounds of the costmap!`, your `robot_x/robot_y` (and initial pose) is outside the saved map bounds. Set `robot_x/robot_y` to a point inside the map and restart.
+
+Optional: send waypoints programmatically (Nav2 Simple Commander):
+```bash
+source ~/slam_rl_ws/install/setup.bash
+ros2 run tb3_nav2_dynamic patrol_robot
 ```
