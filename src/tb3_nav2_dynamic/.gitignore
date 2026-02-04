@@ -1,0 +1,23 @@
+# Python bytecode / caches
+__pycache__/
+*.py[cod]
+
+# Test / type-check / lint caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Python packaging artifacts
+*.egg-info/
+dist/
+
+# ROS 2 / colcon outputs (if built with this package as the base path)
+build/
+install/
+log/
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
