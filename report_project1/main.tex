@@ -5,6 +5,10 @@
 \usepackage[english]{babel}
 \usepackage[T1]{fontenc} % Quan trọng để copy ký tự đúng
 
+% --- Times-like font (paper style) ---
+% TeX Live in this environment does not include `newtx*`, so use `mathptmx`.
+\usepackage{mathptmx}
+
 % --- Formatting Packages ---
 \usepackage{geometry}
 \usepackage{graphicx}
@@ -109,8 +113,10 @@
 \input{sections/4_experiments}
 \input{sections/5_navigation_research}
 \input{sections/6_programmatic_control} % Kết luận xong
-\input{sections/7_conclusion} % Kết luận xong
 \input{sections/8_os_resource_rl}
+\input{sections/7_dynamic_obstacles_nav2}
+\input{sections/7_conclusion} % Kết luận xong
+\input{sections/9_acknowledgements}
 
 % --- Bắt đầu phần Phụ lục ---
 \newpage
