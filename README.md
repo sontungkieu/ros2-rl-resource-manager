@@ -173,3 +173,18 @@ Optional: send waypoints programmatically (Nav2 Simple Commander):
 source ~/slam_rl_ws/install/setup.bash
 ros2 run tb3_nav2_dynamic patrol_robot
 ```
+
+## Limitations
+
+- Experiments are run mainly on WSL2 + Gazebo, so timing jitter from host/VM scheduling can affect reproducibility.
+- The resource manager relies on `nice`/`renice`, which improves fairness but does not provide hard real-time guarantees.
+- RL state/action space is intentionally small, so behavior may degrade in denser maps and heavier dynamic-obstacle traffic.
+
+## Next Steps
+
+- Validate the same pipeline on real TurtleBot3 hardware and compare against WSL2 results.
+- Expand RL observations with SLAM timing and TF delay signals for earlier contention detection.
+- Evaluate stronger OS-level controls (`cgroups`, CPU affinity, RT scheduling) and compare with `renice`.
+- Add automated multi-seed experiment sweeps and consolidated reporting for easier benchmarking.
+
+Read more (PDF): [Project Report](report_project1/main.pdf)
