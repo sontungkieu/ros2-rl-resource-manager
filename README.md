@@ -1,5 +1,7 @@
 # SLAM & RL Resource Manager Workspace (ROS 2 Jazzy)
 
+![drift_nodrift](drift_nodrift.png)
+
 A workspace for SLAM, reactive exploration, and RL-based resource management on TurtleBot3.
 
 ## Components
